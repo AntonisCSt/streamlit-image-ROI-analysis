@@ -402,7 +402,7 @@ def main():
                     st.rerun()
 
     # Main content area
-    col1, col2 = st.columns([3, 2])
+    col1, col2 = st.columns([2, 3])
     
     with col1:
         # Display the image with rectangles if available
@@ -457,17 +457,45 @@ def main():
                     # Create similarity matrix
                     num_rois = len(st.session_state.rectangles)
                     similarity_matrix = np.zeros((num_rois, num_rois))
+                    rgb_similarity_matrix = np.zeros((num_rois, num_rois))
+                    hue_similarity_matrix = np.zeros((num_rois, num_rois))
                     
                     for i in range(num_rois):
                         for j in range(num_rois):
                             if i == j:
-                                similarity_matrix[i, j] = 100.0  # Same ROI has 100% similarity
+                                rgb_similarity_matrix[i, j] = 100.0  # Same ROI has 100% similarity
+                                hue_similarity_matrix[i, j] = 100.0  # Same ROI has 100% similarity
                             else:
                                 sim = calculate_similarity(st.session_state.histograms[i], st.session_state.histograms[j])
-                                if similarity_type == "RGB Similarity":
-                                    similarity_matrix[i, j] = sim['RGB']
-                                else:
-                                    similarity_matrix[i, j] = sim['Hue']
+                                rgb_similarity_matrix[i, j] = sim['RGB']
+                                hue_similarity_matrix[i, j] = sim['Hue']
+                    
+                    # Set the displayed similarity matrix based on user selection
+                    if similarity_type == "RGB Similarity":
+                        similarity_matrix = rgb_similarity_matrix
+                    else:
+                        similarity_matrix = hue_similarity_matrix
+                    
+                    # Calculate average similarities for each ROI
+                    rgb_avg_similarities = []
+                    hue_avg_similarities = []
+                    
+                    for i in range(num_rois):
+                        # Calculate average similarity with all other ROIs (excluding self)
+                        other_indices = [j for j in range(num_rois) if j != i]
+                        if other_indices:  # Check if there are other ROIs to compare with
+                            rgb_avg = np.mean([rgb_similarity_matrix[i, j] for j in other_indices])
+                            hue_avg = np.mean([hue_similarity_matrix[i, j] for j in other_indices])
+                        else:
+                            rgb_avg = 0
+                            hue_avg = 0
+                        
+                        rgb_avg_similarities.append(rgb_avg)
+                        hue_avg_similarities.append(hue_avg)
+                    
+                    # Calculate overall average similarities
+                    overall_rgb_avg = np.mean(rgb_avg_similarities) if rgb_avg_similarities else 0
+                    overall_hue_avg = np.mean(hue_avg_similarities) if hue_avg_similarities else 0
                     
                     # Create a visually appealing similarity table
                     roi_names = [f"ROI {i+1}: {label or 'Unlabeled'}" for i, label in enumerate(st.session_state.labels)]
@@ -476,18 +504,61 @@ def main():
                     html_table = "<table class='similarity-table'><tr><th></th>"
                     for name in roi_names:
                         html_table += f"<th>{name}</th>"
-                    html_table += "</tr>"
+                    html_table += "<th>Avg RGB Sim</th><th>Avg Hue Sim</th></tr>"
                     
                     for i, row_name in enumerate(roi_names):
                         html_table += f"<tr><th>{row_name}</th>"
                         for j in range(num_rois):
                             similarity_value = similarity_matrix[i, j]
                             similarity_class = get_similarity_class(similarity_value)
-                            html_table += f"<td class='{similarity_class}'>{similarity_value}%</td>"
+                            html_table += f"<td class='{similarity_class}'>{similarity_value:.1f}%</td>"
+                        
+                        # Add average similarity columns
+                        rgb_avg_class = get_similarity_class(rgb_avg_similarities[i])
+                        hue_avg_class = get_similarity_class(hue_avg_similarities[i])
+                        html_table += f"<td class='{rgb_avg_class}'>{rgb_avg_similarities[i]:.1f}%</td>"
+                        html_table += f"<td class='{hue_avg_class}'>{hue_avg_similarities[i]:.1f}%</td>"
                         html_table += "</tr>"
-                    html_table += "</table>"
+                    
+                    # Add overall average row
+                    html_table += "<tr><th>Overall Average</th>"
+                    for _ in range(num_rois):
+                        html_table += "<td>-</td>"
+                    
+                    overall_rgb_class = get_similarity_class(overall_rgb_avg)
+                    overall_hue_class = get_similarity_class(overall_hue_avg)
+                    html_table += f"<td class='{overall_rgb_class}'><strong>{overall_rgb_avg:.1f}%</strong></td>"
+                    html_table += f"<td class='{overall_hue_class}'><strong>{overall_hue_avg:.1f}%</strong></td>"
+                    html_table += "</tr></table>"
                     
                     st.markdown(html_table, unsafe_allow_html=True)
+                    
+                    # Add CSS for the table styling
+                    st.markdown("""
+                    <style>
+                    .similarity-table {
+                        width: 100%;
+                        border-collapse: collapse;
+                    }
+                    .similarity-table th, .similarity-table td {
+                        padding: 8px;
+                        text-align: center;
+                        border: 1px solid #ddd;
+                    }
+                    .similarity-table th {
+                        background-color: #f2f2f2;
+                    }
+                    .high-similarity {
+                        background-color: #c8e6c9;
+                    }
+                    .medium-similarity {
+                        background-color: #fff9c4;
+                    }
+                    .low-similarity {
+                        background-color: #ffcdd2;
+                    }
+                    </style>
+                    """, unsafe_allow_html=True)
                     
                     # Add a legend for the color coding
                     legend_col1, legend_col2, legend_col3 = st.columns(3)
@@ -496,8 +567,7 @@ def main():
                     with legend_col2:
                         st.markdown("<div class='medium-similarity' style='padding:5px;'>Medium Similarity (50-79%)</div>", unsafe_allow_html=True)
                     with legend_col3:
-                        st.markdown("<div class='low-similarity' style='padding:5px;'>Low Similarity (<50%)</div>", unsafe_allow_html=True)
-                    
+                        st.markdown("<div class='low-similarity' style='padding:5px;'>Low Similarity (<50%)</div>", unsafe_allow_html=True)                    
             else:
                 st.image(cv2.cvtColor(st.session_state.current_image, cv2.COLOR_BGR2RGB), use_column_width=True)
                 st.info("Draw rectangles using the controls in the sidebar to analyze regions of interest.")
@@ -505,87 +575,88 @@ def main():
             st.info("Please upload an image using the sidebar to get started.")
     
     with col2:
-        # Display analysis if we have rectangles and an image
-        if st.session_state.current_image is not None and st.session_state.rectangles:
-            st.subheader("ROI Analysis")
-            
-            # Select ROI to display
-            roi_options = [f"ROI {i+1}: {label or 'Unlabeled'}" for i, label in enumerate(st.session_state.labels)]
-            selected_roi = st.selectbox("Select ROI to analyze", roi_options)
-            roi_index = int(selected_roi.split(":")[0].replace("ROI ", "")) - 1
-            
-            # Get the selected rectangle
-            x1, y1, x2, y2 = st.session_state.rectangles[roi_index]
-            
-            # Extract the ROI from the image
-            roi = st.session_state.current_image[y1:y2, x1:x2]
-            
-            # Display ROI
-            st.image(cv2.cvtColor(roi, cv2.COLOR_BGR2RGB), caption=f"Selected ROI: {st.session_state.labels[roi_index] or 'Unlabeled'}")
-            
-            # Create mask for the ROI
-            mask = create_rectangle_mask(st.session_state.current_image.shape, x1, y1, x2, y2)
-            
-            # Calculate mean values
-            mean_values = calculate_mean_values(st.session_state.current_image, mask)
-            
-            # Display mean values
-            st.markdown("<div class='highlight'>", unsafe_allow_html=True)
-            st.subheader("Mean Color Values")
-            
-            col_r, col_g, col_b = st.columns(3)
-            with col_r:
-                st.markdown(f"**R:** {mean_values['RGB'][0]}")
-            with col_g:
-                st.markdown(f"**G:** {mean_values['RGB'][1]}")
-            with col_b:
-                st.markdown(f"**B:** {mean_values['RGB'][2]}")
-            
-            col_h, col_s, col_v = st.columns(3)
-            with col_h:
-                st.markdown(f"**H:** {mean_values['HSV'][0]}")
-            with col_s:
-                st.markdown(f"**S:** {mean_values['HSV'][1]}")
-            with col_v:
-                st.markdown(f"**V:** {mean_values['HSV'][2]}")
-            
-            # Show color swatch
-            r, g, b = [int(x) for x in mean_values['RGB']]
-            color_swatch = f"<div style='background-color: rgb({r},{g},{b}); width:100%; height:30px; border-radius:5px;'></div>"
-            st.markdown(color_swatch, unsafe_allow_html=True)
-            st.markdown("</div>", unsafe_allow_html=True)
-            
-            # Calculate histograms if needed or use existing ones
-            if roi_index < len(st.session_state.histograms):
-                histograms = st.session_state.histograms[roi_index]
-            else:
-                histograms = calculate_histogram(st.session_state.current_image, mask)
-                st.session_state.histograms.append(histograms)
-            
-            # Display histograms with increased size
-            st.subheader("RGB Histograms")
-            
-            # RGB histograms - using full width for better visibility
-            fig_r = plot_histograms(histograms['RGB'], 0, 'red', 'Red')
-            st.image(fig_to_image(fig_r))
-            
-            fig_g = plot_histograms(histograms['RGB'], 1, 'green', 'Green')
-            st.image(fig_to_image(fig_g))
-            
-            fig_b = plot_histograms(histograms['RGB'], 2, 'blue', 'Blue')
-            st.image(fig_to_image(fig_b))
-            
-            # HSV histograms
-            st.subheader("HSV Histograms")
-            
-            fig_h = plot_histograms(histograms['HSV'], 0, 'orange', 'Hue')
-            st.image(fig_to_image(fig_h))
-            
-            fig_s = plot_histograms(histograms['HSV'], 1, 'purple', 'Saturation')
-            st.image(fig_to_image(fig_s))
-            
-            fig_v = plot_histograms(histograms['HSV'], 2, 'gray', 'Value')
-            st.image(fig_to_image(fig_v))
+        with st.expander("Show ROI Analysis"):
+            # Display analysis if we have rectangles and an image
+            if st.session_state.current_image is not None and st.session_state.rectangles:
+                st.subheader("ROI Analysis")
+                
+                # Select ROI to display
+                roi_options = [f"ROI {i+1}: {label or 'Unlabeled'}" for i, label in enumerate(st.session_state.labels)]
+                selected_roi = st.selectbox("Select ROI to analyze", roi_options)
+                roi_index = int(selected_roi.split(":")[0].replace("ROI ", "")) - 1
+                
+                # Get the selected rectangle
+                x1, y1, x2, y2 = st.session_state.rectangles[roi_index]
+                
+                # Extract the ROI from the image
+                roi = st.session_state.current_image[y1:y2, x1:x2]
+                
+                # Display ROI
+                st.image(cv2.cvtColor(roi, cv2.COLOR_BGR2RGB), caption=f"Selected ROI: {st.session_state.labels[roi_index] or 'Unlabeled'}",width=50)
+                
+                # Create mask for the ROI
+                mask = create_rectangle_mask(st.session_state.current_image.shape, x1, y1, x2, y2)
+                
+                # Calculate mean values
+                mean_values = calculate_mean_values(st.session_state.current_image, mask)
+                
+                # Display mean values
+                st.markdown("<div class='highlight'>", unsafe_allow_html=True)
+                st.subheader("Mean Color Values")
+                
+                col_r, col_g, col_b = st.columns(3)
+                with col_r:
+                    st.markdown(f"**R:** {mean_values['RGB'][0]}")
+                with col_g:
+                    st.markdown(f"**G:** {mean_values['RGB'][1]}")
+                with col_b:
+                    st.markdown(f"**B:** {mean_values['RGB'][2]}")
+                
+                col_h, col_s, col_v = st.columns(3)
+                with col_h:
+                    st.markdown(f"**H:** {mean_values['HSV'][0]}")
+                with col_s:
+                    st.markdown(f"**S:** {mean_values['HSV'][1]}")
+                with col_v:
+                    st.markdown(f"**V:** {mean_values['HSV'][2]}")
+                
+                # Show color swatch
+                r, g, b = [int(x) for x in mean_values['RGB']]
+                color_swatch = f"<div style='background-color: rgb({r},{g},{b}); width:100%; height:30px; border-radius:5px;'></div>"
+                st.markdown(color_swatch, unsafe_allow_html=True)
+                st.markdown("</div>", unsafe_allow_html=True)
+                
+                # Calculate histograms if needed or use existing ones
+                if roi_index < len(st.session_state.histograms):
+                    histograms = st.session_state.histograms[roi_index]
+                else:
+                    histograms = calculate_histogram(st.session_state.current_image, mask)
+                    st.session_state.histograms.append(histograms)
+                
+                # Display histograms with increased size
+                st.subheader("RGB Histograms")
+                
+                # RGB histograms - using full width for better visibility
+                fig_r = plot_histograms(histograms['RGB'], 0, 'red', 'Red')
+                st.image(fig_to_image(fig_r))
+                
+                fig_g = plot_histograms(histograms['RGB'], 1, 'green', 'Green')
+                st.image(fig_to_image(fig_g))
+                
+                fig_b = plot_histograms(histograms['RGB'], 2, 'blue', 'Blue')
+                st.image(fig_to_image(fig_b))
+                
+                # HSV histograms
+                st.subheader("HSV Histograms")
+                
+                fig_h = plot_histograms(histograms['HSV'], 0, 'orange', 'Hue')
+                st.image(fig_to_image(fig_h))
+                
+                fig_s = plot_histograms(histograms['HSV'], 1, 'purple', 'Saturation')
+                st.image(fig_to_image(fig_s))
+                
+                fig_v = plot_histograms(histograms['HSV'], 2, 'gray', 'Value')
+                st.image(fig_to_image(fig_v))
 
 if __name__ == "__main__":
     main()
